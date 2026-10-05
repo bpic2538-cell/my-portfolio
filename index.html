@@ -259,7 +259,30 @@
             }
         ];
 
+        function loadExhibitsFromStorage() {
+            const saved = localStorage.getItem('saranmontri_exhibits_data_v2');
+            if (saved) {
+                try {
+                    exhibits = JSON.parse(saved);
+                } catch (e) {
+                    exhibits = [...defaultExhibits];
+                }
+            } else {
+                exhibits = [...defaultExhibits];
+            }
+        }
+
+        function saveExhibitsToStorage() {
+            try {
+                localStorage.setItem('saranmontri_exhibits_data_v2', JSON.stringify(exhibits));
+            } catch (e) {
+                console.log('Storage quota exceeded or error:', e);
+            }
+        }
+
         function init() {
+            loadExhibitsFromStorage();
+
             const container = document.getElementById('canvas-container');
 
             scene = new THREE.Scene();
@@ -294,7 +317,6 @@
 
             buildExhibitionRoom();
 
-            exhibits = [...defaultExhibits];
             renderExhibitsInScene();
             renderExhibitsList();
 
@@ -474,9 +496,8 @@
                 });
                 const holoMesh = new THREE.Mesh(holoGeo, holoMat);
                 
-                // Positioned lower and further out so it absolutely never overlaps or blocks the exhibit image above
                 holoMesh.position.set(0, -3.8, 0.9);
-                holoMesh.rotation.x = -0.15; // Slightly tilted upward for perfect viewing angle
+                holoMesh.rotation.x = -0.15;
                 holoMesh.visible = false;
                 group.add(holoMesh);
 
@@ -794,11 +815,6 @@
             const description = document.getElementById('form-desc').value;
             const imageInput = document.getElementById('form-images');
 
-            let imageUrls = [];
-            let aspectRatio = 16 / 9;
-            let width = 5.5;
-            let height = 3.1;
-
             const positions = [
                 { x: 0, y: 5.2, z: -10, rotY: 0 },
                 { x: -10, y: 5.2, z: 0, rotY: Math.PI / 2 },
@@ -808,47 +824,63 @@
             const pos = positions[posIndex];
 
             if (imageInput.files && imageInput.files.length > 0) {
+                let loadedCount = 0;
+                let imageUrls = [];
+                let firstAspect = 16 / 9;
+
                 for (let i = 0; i < imageInput.files.length; i++) {
-                    imageUrls.push(URL.createObjectURL(imageInput.files[i]));
+                    const reader = new FileReader();
+                    const file = imageInput.files[i];
+                    
+                    reader.onload = function(e) {
+                        const base64Url = e.target.result;
+                        imageUrls.push(base64Url);
+
+                        if (loadedCount === 0) {
+                            const tempImg = new Image();
+                            tempImg.src = base64Url;
+                            tempImg.onload = function() {
+                                if (tempImg.naturalWidth && tempImg.naturalHeight) {
+                                    firstAspect = tempImg.naturalWidth / tempImg.naturalHeight;
+                                }
+                            };
+                        }
+
+                        loadedCount++;
+                        if (loadedCount === imageInput.files.length) {
+                            const newExhibit = {
+                                title,
+                                category,
+                                description,
+                                images: imageUrls,
+                                aspectRatio: firstAspect,
+                                position: { x: pos.x, y: pos.y, z: pos.z },
+                                rotation: { x: 0, y: pos.rotY, z: 0 },
+                                size: { width: 5.5, height: 5.5 / firstAspect }
+                            };
+
+                            exhibits.push(newExhibit);
+                            saveExhibitsToStorage();
+                            renderExhibitsInScene();
+                            renderExhibitsList();
+                        }
+                    };
+                    reader.readAsDataURL(file);
                 }
-
-                const firstImg = new Image();
-                firstImg.src = imageUrls[0];
-                firstImg.onload = function() {
-                    if (firstImg.naturalWidth && firstImg.naturalHeight) {
-                        aspectRatio = firstImg.naturalWidth / firstImg.naturalHeight;
-                        width = 5.5;
-                        height = width / aspectRatio;
-
-                        const newExhibit = {
-                            title,
-                            category,
-                            description,
-                            images: imageUrls,
-                            aspectRatio: aspectRatio,
-                            position: { x: pos.x, y: pos.y, z: pos.z },
-                            rotation: { x: 0, y: pos.rotY, z: 0 },
-                            size: { width: width, height: height }
-                        };
-
-                        exhibits.push(newExhibit);
-                        renderExhibitsInScene();
-                        renderExhibitsList();
-                    }
-                };
             } else {
                 const newExhibit = {
                     title,
                     category,
                     description,
                     images: [],
-                    aspectRatio: aspectRatio,
+                    aspectRatio: 16 / 9,
                     position: { x: pos.x, y: pos.y, z: pos.z },
                     rotation: { x: 0, y: pos.rotY, z: 0 },
-                    size: { width: width, height: height }
+                    size: { width: 5.5, height: 3.1 }
                 };
 
                 exhibits.push(newExhibit);
+                saveExhibitsToStorage();
                 renderExhibitsInScene();
                 renderExhibitsList();
             }
@@ -861,14 +893,23 @@
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
+            let loadedCount = 0;
             for (let i = 0; i < files.length; i++) {
-                const url = URL.createObjectURL(files[i]);
-                exhibits[index].images.push(url);
-            }
+                const reader = new FileReader();
+                const file = files[i];
 
-            renderExhibitsInScene();
-            renderExhibitsList();
-            playSound('click');
+                reader.onload = function(e) {
+                    exhibits[index].images.push(e.target.result);
+                    loadedCount++;
+                    if (loadedCount === files.length) {
+                        saveExhibitsToStorage();
+                        renderExhibitsInScene();
+                        renderExhibitsList();
+                        playSound('click');
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
         }
 
         function renderExhibitsList() {
@@ -898,6 +939,7 @@
 
         function removeExhibit(index) {
             exhibits.splice(index, 1);
+            saveExhibitsToStorage();
             renderExhibitsInScene();
             renderExhibitsList();
         }
